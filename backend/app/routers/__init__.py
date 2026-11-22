@@ -1,6 +1,6 @@
-"""业务路由汇总：所有模块共用一套资源路由，由领域服务完成分派。"""
+"""业务路由汇总：重放数据包为专用路由，需排在通用资源路由之前避免动态路径抢先匹配。"""
 from __future__ import annotations
 
-from app.routers import resource
+from app.routers import replay, resource
 
-ROUTERS = [resource]
+ROUTERS = [replay, resource]

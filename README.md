@@ -16,9 +16,14 @@
 │   └── vite.config.ts        dev server 配置（open: false）
 ├── backend/                  FastAPI（Python） 后端
 │   ├── app/routers/resource.py  通用查询/导出/登记/动作接口
+│   ├── app/routers/replay.py   重放数据包：分段导出/断点续取/恢复核验
 │   ├── app/services/<key>.py    每个模块独立领域逻辑
+│   ├── app/services/replay_pack.py 乱序溢出区间重放包与增量回填台账
 │   ├── app/services/base.py     共享服务骨架
 │   └── app/store.py          内存数据仓库与示例数据
+├── scripts/                  验收脚本（python -I 运行，独立于后端目录）
+│   ├── e2e_replay_pack.py    重放数据包端到端剧情验收
+│   └── test_replay_negative.py 来源校验负向路径测试
 ├── .gitignore
 └── docker-compose.yml
 ```
@@ -80,6 +85,34 @@ npm run dev
   `frontend/src/domain/<模块>.ts`，用于承载真实业务差异并维持36题位容量。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+
+## 乱序溢出区间：重放数据包与断点恢复
+
+乱序超窗口丢弃的事件流需要可交给恢复人员的原始日志样本，对应
+`backend/app/services/replay_pack.py` 与 `app/routers/replay.py`
+（前端页面：导航「重放数据包」，路由 `/replay-pack`）。
+
+- **分段导出**：针对溢出报告（如 `OVF-0001`，源文件 `binlog.001234`，偏移
+  240~320 含两端）制作重放数据包；每段携带数据流标识、源日志文件和偏移上下界，
+  并提供可下载的事件文件（JSONL）与源位置索引（JSON，含逐事件校验和）。
+- **断点续取**：下载可在指定偏移模拟中断（`stop_after_offset`），续取按已完成
+  区间继续，服务端逐事件回查源文件并校验数据流/文件/边界/校验和；读到源文件
+  末尾后才补达的迟到事件（如偏移 275）会随新交付批次进入同一个包。
+- **恢复核验与增量回填**：`POST /api/replay/packs/{id}/recover` 用收到的包核验
+  溢出报告、源文件和实际事件，只把有据可核且尚未回填的事件登记到回填台账
+  （`backfill_ledger`，唯一键为 `源文件@偏移`）；重复恢复或补包不会让已验收
+  事件再次进入回填，区间重叠也不会漏掉新事件。
+- **缺来源待核**：源文件不可读的补包可登记为「来源待核」并挂靠原报告，
+  恢复时挂起、不产生回填。
+- **追溯**：按包索引可核对任一偏移来自哪个分段的哪次交付；
+  `/api/replay/backfill-trace/{event_key}` 可查到事件实际进入的回填记录。
+
+验收（需先启动后端）：
+
+```bash
+python3 -I scripts/e2e_replay_pack.py      # 65 项端到端剧情检查
+python3 -I scripts/test_replay_negative.py # 24 项来源校验负向检查
+```
 
 领域：数据工程
 子方向：数仓与数据湖
